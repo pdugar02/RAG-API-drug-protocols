@@ -1,0 +1,23 @@
+Ingest
+- SmartPDF Loader to load documents
+Chunk
+- Hierarchical Node Parser
+Index
+- class that stores the documents and snippets separately
+
+App
+- ingest
+    - needs to just run the ingestion script, chunk the pdfs, and create an index we can query
+- chat
+    - needs to get the index_store, create a query engine with Llama Index
+    - Then, send the query to the query engine and return an answer(str) + citations(list of tuples)
+- get documents
+    - go to index_store and get all documents, return a dictionary of {doc_id: metadata}
+- get snippet
+    - go to index_store and look through the snippets using snippet_id, return metadata of doc_id, page number, and text
+
+
+Stack:
+- fastapi
+- llama index for load/index/chunk
+- 
