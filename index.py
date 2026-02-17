@@ -1,5 +1,4 @@
 from llama_index.core import (
-    SimpleDirectoryReader,
     VectorStoreIndex,
     StorageContext,
     load_index_from_storage,
@@ -8,6 +7,7 @@ from llama_index.core.node_parser import HierarchicalNodeParser
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
 
+import pymupdf4llm as pymupdf
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -26,55 +26,50 @@ class IndexStore:
         
     def ingest_pdfs(self, pdf_paths: list[str]):
         print("starting ingestion")
+        all_nodes = []
         # 1) Load PDFs
-        docs = SimpleDirectoryReader(input_files=pdf_paths).load_data()
+        for pdf_path in pdf_paths:
+            # Extract filename from pdf_path
+            filename = os.path.basename(pdf_path)
+            
+            pages = pymupdf.LlamaMarkdownReader().load_data(pdf_path)
+            parser = HierarchicalNodeParser.from_defaults()
+            nodes = parser(pages)
+            for node in nodes:
+                # Set or replace document_id with filename
+                node.metadata['document_id'] = filename
+                
+                # Add node to doc_snippets using id_ as snippet_id
+                snippet_id = f"snippet_{node.id_}"
+                meta = {
+                    "doc_id": filename,
+                    "page": node.metadata.get("page"),
+                    "text": node.text
+                }
+                self.doc_snippets[snippet_id] = meta
+            
+            # Add filename to doc_store if not already present
+            if filename not in self.doc_store:
+                self.doc_store[filename] = {
+                    "title": filename,
+                    "num_pages": nodes[0].metadata.get("total_pages"),
+                    "num_snippets": len(nodes)
+                }
 
-        # 2) Chunk while preserving headings/structure
-        parser = HierarchicalNodeParser.from_defaults()
-        nodes = parser(docs)
-
+            all_nodes.extend(nodes)
+   
         print("Nodes are parsed!")
         # 3) Build index with empty storage, then persist to disk
         embed_model = OpenAIEmbedding(model="text-embedding-3-large")
-        storage_context = StorageContext.from_defaults()  # empty; do not use persist_dir here
-        self.index = VectorStoreIndex(
-            nodes,
-            embed_model=embed_model,
-            storage_context=storage_context,
-            show_progress=True,
-        )
+        storage_context = StorageContext.from_defaults()
+        self.index = VectorStoreIndex(all_nodes, embed_model=embed_model, storage_context=storage_context, show_progress=True)
         os.makedirs(INDEX_PATH, exist_ok=True)
         storage_context.persist(persist_dir=INDEX_PATH)
         print("Index is built!")
-        # 1) Build doc_store and snippet_store
-        for i, node in enumerate(nodes):
-            # Create snippet_id
-            snippet_id = f"snippet_{i}"
-            meta = {
-                "doc_id": node.metadata['file_name'],
-                "page": node.extra_info.get("page", None),
-                "text": node.text
-            }
 
-            # Add snippet → metadata
-            self.doc_snippets[snippet_id] = meta
-
-            # Initialize doc_store entry if not present
-            if node.metadata['file_name'] not in self.doc_store:
-                # Attempt to read title and num_pages from node or doc object
-                title = getattr(node, "title", None) or node.metadata['file_name']
-                num_pages = getattr(node, "num_pages", None) or "unknown"
-
-                self.doc_store[node.metadata['file_name']] = {
-                    "title": title,
-                    "num_pages": num_pages,
-                    "num_snippets": 0
-                }
-
-            # Increment snippet count for that document
-            self.doc_store[node.metadata['file_name']]["num_snippets"] += 1
+        # Note: doc_store and doc_snippets are now built during the loop above
         print("finished ingestion!")
-        return len(nodes)
+        return len(all_nodes)
 
     def query(self, query_str: str):
         if not self.index:
