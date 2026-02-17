@@ -1,26 +1,29 @@
 from llama_index.core import (
     SimpleDirectoryReader,
     VectorStoreIndex,
-    PromptHelper
+    StorageContext,
+    load_index_from_storage,
 )
 from llama_index.core.node_parser import HierarchicalNodeParser
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
+
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 import openai
 
-INDEX_PATH = "index.json"
-# Load environment from .env (if present) and set OpenAI API key
-load_dotenv()
+INDEX_PATH = "index_store"
+# Load .env from project root (same dir as this file) so it works regardless of cwd
+load_dotenv(Path(__file__).resolve().parent / ".env")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class IndexStore:
     def __init__(self):
         self.index = None
         self.doc_snippets = {}  # maps snippet ID -> metadata
-        self.doc_store = {} # maps doc_id -> document metadata
-
+        self.doc_store = {}  # maps doc_id -> document metadata
+        
     def ingest_pdfs(self, pdf_paths: list[str]):
         print("starting ingestion")
         # 1) Load PDFs
@@ -31,13 +34,17 @@ class IndexStore:
         nodes = parser(docs)
 
         print("Nodes are parsed!")
-        # 3) Build index
+        # 3) Build index with empty storage, then persist to disk
         embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+        storage_context = StorageContext.from_defaults()  # empty; do not use persist_dir here
         self.index = VectorStoreIndex(
             nodes,
             embed_model=embed_model,
-            show_progress=True
+            storage_context=storage_context,
+            show_progress=True,
         )
+        os.makedirs(INDEX_PATH, exist_ok=True)
+        storage_context.persist(persist_dir=INDEX_PATH)
         print("Index is built!")
         # 1) Build doc_store and snippet_store
         for i, node in enumerate(nodes):
@@ -71,13 +78,20 @@ class IndexStore:
 
     def query(self, query_str: str):
         if not self.index:
-            raise RuntimeError("No index loaded")
-        llm = OpenAI(model="o1-mini", temperature=0.0)
-
+            try:
+                storage_context = StorageContext.from_defaults(persist_dir=INDEX_PATH)
+                self.index = load_index_from_storage(storage_context)
+            except Exception as e:
+                print(f"Could not load index from {INDEX_PATH}: {e}")
+                return "No index loaded"
+        # Use same embed model as at index time so query embedding dimension matches stored vectors
+        embed_model = OpenAIEmbedding(model="text-embedding-3-large")
+        llm = OpenAI(model="gpt-4o-mini", temperature=0.0)
         engine = self.index.as_query_engine(
             use_sources=True,
             similarity_top_k=3,
-            llm=llm
+            llm=llm,
+            embed_model=embed_model,
         )
         result = engine.query(query_str)
         return result

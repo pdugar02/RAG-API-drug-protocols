@@ -1,12 +1,7 @@
 from fastapi import (
-    APIRouter,
     FastAPI, 
-    Request, 
     HTTPException
 )
-from typing import List
-from fastapi.responses import JSONResponse
-
 
 from schemas import ChatRequest
 from index import index_store
@@ -44,13 +39,15 @@ async def chat(body: ChatRequest):
     # Ensure at least one citation
     citations = []
     for src in getattr(result, "source_nodes", []):
+        print(src)
         snippet_id = f"snippet_{src.node_id}"
         meta = index_store.doc_snippets.get(snippet_id, {})
+        print(meta.get('Text'))
         citations.append({
-            "doc_id": meta.get("doc_id"),
-            "page_number": meta.get("page"),
+            "doc_id": meta.get("Node_id"),
+            "page_number": meta.get('page'),
             "snippet_id": snippet_id,
-            "excerpt": meta.get("text")[:200]
+            "excerpt": meta.get('Text')
         })
 
     # Build answer or fallback
