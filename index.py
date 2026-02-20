@@ -3,7 +3,12 @@ from llama_index.core import (
     StorageContext,
     load_index_from_storage,
 )
-from llama_index.core.node_parser import HierarchicalNodeParser
+from llama_index.core.node_parser import (
+    HierarchicalNodeParser, 
+    SemanticDoubleMergingSplitterNodeParser,
+    SemanticSplitterNodeParser,
+    SentenceWindowNodeParser
+)
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
 
@@ -27,14 +32,18 @@ class IndexStore:
     def ingest_pdfs(self, pdf_paths: list[str]):
         print("starting ingestion")
         all_nodes = []
-        # 1) Load PDFs
+        # 1) Load each PDF under the data folder one at a time
         for pdf_path in pdf_paths:
             # Extract filename from pdf_path
             filename = os.path.basename(pdf_path)
             
             pages = pymupdf.LlamaMarkdownReader().load_data(pdf_path)
-            parser = HierarchicalNodeParser.from_defaults()
-            nodes = parser(pages)
+            # parser = SemanticSplitterNodeParser(
+            #     embed_model=OpenAIEmbedding(buffer_size=100, model="text-embedding-3-large")
+            # )
+            # nodes = parser.build_semantic_nodes_from_documents(pages, show_progress=True)
+            parser = SentenceWindowNodeParser()
+            nodes = parser.build_window_nodes_from_documents(pages)
             for node in nodes:
                 # Set or replace document_id with filename
                 node.metadata['document_id'] = filename
